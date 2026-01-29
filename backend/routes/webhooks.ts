@@ -100,7 +100,7 @@ router.get('/whatsapp', (req: Request, res: Response) => {
     // Check with ENV or DB config?
     // For now, accepting any token or a fixed one "trae_whatsapp_verify"
     // In production, fetch from DB api_config if needed, or ENV.
-    const VERIFY_TOKEN = process.env.WHATSAPP_VERIFY_TOKEN || 'trae_whatsapp_verify';
+    const VERIFY_TOKEN = "123456";
 
     if (mode && token) {
         if (mode === 'subscribe' && token === VERIFY_TOKEN) {
