@@ -68,41 +68,51 @@ const FlowBuilderContent = () => {
       const flowData = response.data.data;
       setFlowName(flowData.name);
       
+      // Always create start node first
+      const startNode = {
+        id: 'start-node',
+        type: 'start',
+        position: { x: 100, y: 100 },
+        data: { 
+          label: 'Start', 
+          triggerType: flowData.triggerType || 'webhook',
+          webhookUrl: flowData.webhookUrl
+        },
+        draggable: true,
+      };
+      
       // Map backend nodes to ReactFlow nodes
-      let initialNodes = flowData.nodes.map((n: any) => ({
-        id: n._id, 
-        type: n.type, 
-        position: n.position || { x: 0, y: 0 },
-        data: { label: n.name, ...n.properties }, 
-      }));
+      const flowNodes = (flowData.nodes || [])
+        .filter((n: any) => n.type !== 'start') // Filter out any existing start nodes from backend
+        .map((n: any) => ({
+          id: n._id, 
+          type: n.type, 
+          position: n.position || { x: 300, y: 100 },
+          data: { label: n.name, ...n.properties }, 
+        }));
       
-      // Ensure Start Node exists
-      const hasStartNode = initialNodes.some((n: any) => n.type === 'start');
-      if (!hasStartNode) {
-        const startNode = {
-          id: 'start-node',
-          type: 'start',
-          position: { x: 100, y: 100 },
-          data: { label: 'Start', triggerType: flowData.triggerType || 'keyword' },
-          draggable: false, // Usually start node is fixed or at least unique
-        };
-        initialNodes = [startNode, ...initialNodes];
-      }
+      // Combine start node with other nodes
+      const allNodes = [startNode, ...flowNodes];
       
+      // Build edges from connections
       const initialEdges: Edge[] = [];
-      flowData.nodes.forEach((sourceNode: any) => {
+      
+      // Add edges from start node if first_node_id exists
+      if (flowData.nodes) {
+        flowData.nodes.forEach((sourceNode: any) => {
           if (sourceNode.connections) {
-              sourceNode.connections.forEach((conn: any) => {
-                  initialEdges.push({
-                      id: `e${sourceNode._id}-${conn.targetNodeId}`,
-                      source: sourceNode._id,
-                      target: conn.targetNodeId,
-                  });
+            sourceNode.connections.forEach((conn: any) => {
+              initialEdges.push({
+                id: `e${sourceNode._id}-${conn.targetNodeId}`,
+                source: sourceNode._id,
+                target: conn.targetNodeId,
               });
+            });
           }
-      });
+        });
+      }
 
-      setNodes(initialNodes);
+      setNodes(allNodes);
       setEdges(initialEdges);
     } catch (error) {
       console.error('Error fetching flow:', error);
@@ -184,22 +194,35 @@ const FlowBuilderContent = () => {
     if (!id) return;
     setSaving(true);
     try {
-      // 1. Update Flow Metadata (Name, Trigger) - assuming trigger info is in Start Node
+      console.log('Saving flow...', { nodes, edges });
+      
+      // 1. Find start node and its first connection
       const startNode = nodes.find(n => n.type === 'start');
+      const startEdge = edges.find(e => e.source === 'start-node');
+      const firstNodeId = startEdge?.target || null;
+
+      console.log('Start node:', startNode);
+      console.log('First node ID:', firstNodeId);
+
+      // 2. Update Flow Metadata (Name, Trigger, First Node)
       if (startNode) {
-         await api.put(`/flows/${id}`, {
-            triggerType: startNode.data.triggerType,
-            triggerValue: startNode.data.triggerValue
+         const flowUpdate = await api.put(`/flows/${id}`, {
+            triggerType: startNode.data.triggerType || 'webhook',
+            triggerValue: startNode.data.triggerValue || '',
+            firstNodeId: firstNodeId
          });
+         console.log('Flow updated:', flowUpdate.data);
       }
 
+      // 3. Prepare nodes payload with proper button routing
       const nodesPayload = nodes
-        .filter(n => n.type !== 'start') // Exclude virtual start node from saving to DB as a 'node' (unless we want to persist it)
+        .filter(n => n.type !== 'start') // Exclude virtual start node
         .map(node => {
         const outgoingEdges = edges.filter(edge => edge.source === node.id);
-        const connections = outgoingEdges.map(edge => ({
+        const connections = outgoingEdges.map((edge, index) => ({
             targetNodeId: edge.target,
-            condition: '' 
+            condition: '',
+            buttonIndex: index // Track which button leads to this connection
         }));
 
         return {
@@ -212,15 +235,23 @@ const FlowBuilderContent = () => {
         };
       });
 
-      await api.post('/nodes/batch', {
+      console.log('Saving nodes:', nodesPayload);
+
+      const nodesResponse = await api.post('/nodes/batch', {
         flowId: id,
         nodes: nodesPayload
       });
       
+      console.log('Nodes saved:', nodesResponse.data);
+      
+      // Refresh flow data
       await fetchFlow(id);
       
-    } catch (error) {
+      alert('Flow saved successfully!');
+      
+    } catch (error: any) {
       console.error('Error saving flow:', error);
+      alert(`Error saving flow: ${error.response?.data?.message || error.message}`);
     } finally {
       setSaving(false);
     }
@@ -244,8 +275,11 @@ const FlowBuilderContent = () => {
                 Back to flows
              </button>
              <div className="h-6 w-px bg-gray-300"></div>
-             <div className="flex items-center">
-                <h1 className="text-lg font-semibold text-gray-800 mr-2">{flowName}</h1>
+             <div className="flex items-center gap-3">
+                <div>
+                  <h1 className="text-lg font-semibold text-gray-800">{flowName}</h1>
+                  <p className="text-xs text-gray-500">Flow ID: {id}</p>
+                </div>
                 <span className="bg-gray-100 text-gray-500 text-xs px-2 py-0.5 rounded">Draft</span>
              </div>
           </div>
