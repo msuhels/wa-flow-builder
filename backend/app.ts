@@ -18,6 +18,7 @@ import flowRoutes from './routes/flows.js'
 import nodeRoutes from './routes/nodes.js'
 import messageRoutes from './routes/messages.js'
 import webhookRoutes from './routes/webhooks.js'
+import contactRoutes from './routes/contacts.js'
 
 // for esm mode
 const __filename = fileURLToPath(import.meta.url)
@@ -42,6 +43,7 @@ app.use('/api/flows', flowRoutes)
 app.use('/api/nodes', nodeRoutes)
 app.use('/api/messages', messageRoutes)
 app.use('/api/webhooks', webhookRoutes)
+app.use('/api/contacts', contactRoutes)
 
 /**
  * health

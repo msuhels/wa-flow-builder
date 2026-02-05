@@ -28,6 +28,10 @@ router.get('/stats', protect, async (req: Request, res: Response): Promise<void>
       .select('*', { count: 'exact', head: true })
       .gte('sent_at', startOfDay.toISOString());
     
+    const totalContactsPromise = supabase
+      .from('contacts')
+      .select('*', { count: 'exact', head: true });
+    
     // For delivery status, we fetch status column of all logs (or maybe limit to recent ones if too many)
     const deliveryStatusPromise = supabase
       .from('message_logs')
@@ -37,11 +41,13 @@ router.get('/stats', protect, async (req: Request, res: Response): Promise<void>
       { count: totalFlows },
       { count: activeFlows },
       { count: messagesSentToday },
+      { count: totalContacts },
       { data: statusLogs }
     ] = await Promise.all([
       totalFlowsPromise,
       activeFlowsPromise,
       messagesSentTodayPromise,
+      totalContactsPromise,
       deliveryStatusPromise
     ]);
 
@@ -60,6 +66,7 @@ router.get('/stats', protect, async (req: Request, res: Response): Promise<void>
         totalFlows: totalFlows || 0,
         activeFlows: activeFlows || 0,
         messagesSentToday: messagesSentToday || 0,
+        totalContacts: totalContacts || 0,
         deliveryStatus: deliveryStatusMap,
       },
     });

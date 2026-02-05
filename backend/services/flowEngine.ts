@@ -100,6 +100,20 @@ export const FlowEngine = {
         .order('created_at', { ascending: false })
         .limit(1)
         .maybeSingle();
+      
+      if (!data) return null;
+      
+      // Check if session has expired (24 hours of inactivity)
+      const lastInteraction = new Date(data.last_interaction_at || data.created_at);
+      const now = new Date();
+      const hoursSinceLastInteraction = (now.getTime() - lastInteraction.getTime()) / (1000 * 60 * 60);
+      
+      if (hoursSinceLastInteraction > 24) {
+        console.log(`[FlowEngine] Session ${data.id} expired after ${hoursSinceLastInteraction.toFixed(1)} hours`);
+        await this.endSession(data.id, 'expired');
+        return null;
+      }
+      
       return data;
     } catch (error) {
       console.error('[FlowEngine] Error getting session:', error);
@@ -144,6 +158,7 @@ export const FlowEngine = {
     
     try {
       // 1. Get or Create Contact
+      console.log('[FlowEngine] Step 1: Getting/creating contact...');
       let { data: contact } = await supabase
           .from('contacts')
           .select('id')
@@ -151,14 +166,21 @@ export const FlowEngine = {
           .maybeSingle();
 
       if (!contact) {
+          console.log('[FlowEngine] Contact not found, creating new...');
           const { data: newContact, error: contactError } = await supabase
               .from('contacts')
               .insert({ phone_number: phoneNumber })
               .select('id')
               .single();
           
-          if (contactError) throw contactError;
+          if (contactError) {
+            console.error('[FlowEngine] Error creating contact:', contactError);
+            throw contactError;
+          }
           contact = newContact;
+          console.log('[FlowEngine] Contact created:', contact?.id);
+      } else {
+        console.log('[FlowEngine] Contact found:', contact.id);
       }
 
       if (!contact) {
@@ -166,6 +188,7 @@ export const FlowEngine = {
       }
 
       // 2. Fetch Flow with first_node_id
+      console.log('[FlowEngine] Step 2: Fetching flow...');
       const { data: flow, error: flowError } = await supabase
           .from('flows')
           .select('*')
@@ -173,8 +196,11 @@ export const FlowEngine = {
           .single();
 
       if (flowError || !flow) {
+        console.error('[FlowEngine] Flow not found:', flowError);
         throw new Error(`Flow ${flowId} not found`);
       }
+      
+      console.log('[FlowEngine] Flow found:', flow.name, 'first_node_id:', flow.first_node_id);
 
       // 3. Get first node ID from flow
       const firstNodeId = flow.first_node_id;
@@ -185,16 +211,22 @@ export const FlowEngine = {
       }
 
       // 4. Fetch all nodes for this flow
+      console.log('[FlowEngine] Step 3: Fetching nodes...');
       const { data: nodes, error: nodesError } = await supabase
           .from('nodes')
           .select('*')
           .eq('flow_id', flowId);
 
-      if (nodesError) throw nodesError;
+      if (nodesError) {
+        console.error('[FlowEngine] Error fetching nodes:', nodesError);
+        throw nodesError;
+      }
       if (!nodes || nodes.length === 0) {
         console.error('[FlowEngine] Flow has no nodes');
         return;
       }
+      
+      console.log('[FlowEngine] Found', nodes.length, 'nodes');
 
       // 5. Verify first node exists
       const firstNode = nodes.find(n => n.id === firstNodeId);
@@ -202,8 +234,11 @@ export const FlowEngine = {
         console.error(`[FlowEngine] First node ${firstNodeId} not found in flow nodes`);
         return;
       }
+      
+      console.log('[FlowEngine] First node found:', firstNode.type, firstNode.name);
 
       // 6. Create Session
+      console.log('[FlowEngine] Step 4: Creating session...');
       const { data: session, error: sessionError } = await supabase
           .from('contact_sessions')
           .insert({
@@ -218,12 +253,18 @@ export const FlowEngine = {
           .select('*')
           .single();
 
-      if (sessionError) throw sessionError;
+      if (sessionError) {
+        console.error('[FlowEngine] Error creating session:', sessionError);
+        throw sessionError;
+      }
 
       console.log(`[FlowEngine] ✓ Session created: ${session.id}`);
 
       // 7. Execute First Node
+      console.log('[FlowEngine] Step 5: Executing first node...');
+      console.log('[FlowEngine] First node properties:', JSON.stringify(firstNode.properties));
       await this.executeNode(session, firstNodeId, nodes);
+      console.log('[FlowEngine] ✓ Flow started successfully');
     } catch (error) {
       console.error('[FlowEngine] Error starting flow:', error);
       await this.logError(phoneNumber, 'startFlow', error);
@@ -468,7 +509,7 @@ export const FlowEngine = {
           case 'message':
           case 'button':
           case 'list':
-              await this.sendMessage(session.phone_number, node.properties, node.id, node.connections);
+              await this.sendMessage(session.phone_number, node.properties, node.id, node.connections, session.context);
               
               // If message has buttons/lists, STOP and wait for input
               const hasInteractive = (node.properties.buttons && node.properties.buttons.length > 0) ||
@@ -483,10 +524,14 @@ export const FlowEngine = {
               break;
 
           case 'input':
-              // Send prompt message
+              // Send prompt message with variable interpolation
+              const promptMessage = this.interpolateVariables(
+                node.properties.label || node.properties.message || 'Please provide your input:',
+                session.context
+              );
               await this.sendMessage(session.phone_number, { 
-                label: node.properties.label || node.properties.message || 'Please provide your input:' 
-              });
+                label: promptMessage
+              }, node.id, node.connections, session.context);
               // STOP and wait for input
               console.log('[FlowEngine] Waiting for user input');
               break;
@@ -568,9 +613,13 @@ export const FlowEngine = {
               break;
               
           case 'handoff':
+              const handoffMessage = this.interpolateVariables(
+                node.properties.message || 'Transferring you to an agent...',
+                session.context
+              );
               await this.sendMessage(session.phone_number, {
-                label: node.properties.message || 'Transferring you to an agent...'
-              });
+                label: handoffMessage
+              }, node.id, node.connections, session.context);
               await this.endSession(session.id, 'paused');
               // TODO: Notify agent system
               break;
@@ -615,9 +664,36 @@ export const FlowEngine = {
           ended_at: new Date().toISOString()
         })
         .eq('id', sessionId);
+      
+      // Update contact last interaction time
+      const { data: session } = await supabase
+        .from('contact_sessions')
+        .select('phone_number')
+        .eq('id', sessionId)
+        .single();
+        
+      if (session) {
+        await supabase
+          .from('contacts')
+          .update({ 
+            last_interaction_at: new Date().toISOString(),
+            updated_at: new Date().toISOString()
+          })
+          .eq('phone_number', session.phone_number);
+      }
   },
 
-  async sendMessage(to: string, content: any, nodeId?: string, connections?: Connection[]) {
+  interpolateVariables(text: string, context: any): string {
+    if (!text) return text;
+    
+    // Replace {{variableName}} with actual values from context
+    return text.replace(/\{\{(\w+)\}\}/g, (match, varName) => {
+      const value = context[varName];
+      return value !== undefined && value !== null ? String(value) : match;
+    });
+  },
+
+  async sendMessage(to: string, content: any, nodeId?: string, connections?: Connection[], context?: any) {
     console.log(`[FlowEngine] Sending message to: ${to}`);
 
     try {
@@ -629,13 +705,14 @@ export const FlowEngine = {
         .limit(1)
         .maybeSingle();
 
-      if (!config || !config.api_key || !config.business_number_id) {
-          console.error('[FlowEngine] Missing API Config (Token or Phone ID)');
-          return;
+      const hasConfig = config && config.api_key && config.business_number_id;
+      
+      if (!hasConfig) {
+          console.log('[FlowEngine] No API Config - Test Mode (will log message only)');
       }
 
       const version = 'v17.0';
-      const url = `https://graph.facebook.com/${version}/${config.business_number_id}/messages`;
+      const url = hasConfig ? `https://graph.facebook.com/${version}/${config.business_number_id}/messages` : '';
       
       // 2. Construct Payload
       let payload: any = {
@@ -647,16 +724,22 @@ export const FlowEngine = {
       if (content.buttons && content.buttons.length > 0) {
           // Interactive Message (Buttons) - Map buttons to connections
           payload.type = 'interactive';
+          
+          const bodyText = this.interpolateVariables(
+            content.label || content.message || 'Please select an option:', 
+            context || {}
+          );
+          
           payload.interactive = {
               type: 'button',
-              body: { text: content.label || content.message || 'Please select an option:' },
+              body: { text: bodyText },
               action: {
                   buttons: content.buttons.slice(0, 3).map((btn: any, idx: number) => ({
                       type: 'reply',
                       reply: {
                           // CRITICAL: Include nodeId in button ID for routing
                           id: `${nodeId}_btn_${idx}`,
-                          title: btn.text.substring(0, 20) // WhatsApp limit: 20 chars
+                          title: this.interpolateVariables(btn.text, context || {}).substring(0, 20)
                       }
                   }))
               }
@@ -664,63 +747,91 @@ export const FlowEngine = {
           
           // Add header if exists
           if (content.header) {
-            payload.interactive.header = { type: 'text', text: content.header };
+            payload.interactive.header = { 
+              type: 'text', 
+              text: this.interpolateVariables(content.header, context || {})
+            };
           }
           
           // Add footer if exists
           if (content.footer) {
-            payload.interactive.footer = { text: content.footer };
+            payload.interactive.footer = { 
+              text: this.interpolateVariables(content.footer, context || {})
+            };
           }
 
       } else if (content.listItems && content.listItems.length > 0) {
           // Interactive Message (List)
           payload.type = 'interactive';
+          
+          const bodyText = this.interpolateVariables(
+            content.label || content.message || 'Please select an option:', 
+            context || {}
+          );
+          
           payload.interactive = {
               type: 'list',
-              body: { text: content.label || content.message || 'Please select an option:' },
+              body: { text: bodyText },
               action: {
-                  button: content.buttonText || 'Select',
+                  button: this.interpolateVariables(content.buttonText || 'Select', context || {}),
                   sections: [{
-                      title: content.sectionTitle || 'Options',
+                      title: this.interpolateVariables(content.sectionTitle || 'Options', context || {}),
                       rows: content.listItems.slice(0, 10).map((item: any, idx: number) => ({
                           id: `${nodeId}_list_${idx}`,
-                          title: item.title.substring(0, 24),
-                          description: item.description?.substring(0, 72) || ''
+                          title: this.interpolateVariables(item.title, context || {}).substring(0, 24),
+                          description: this.interpolateVariables(item.description || '', context || {}).substring(0, 72)
                       }))
                   }]
               }
           };
           
           if (content.header) {
-            payload.interactive.header = { type: 'text', text: content.header };
+            payload.interactive.header = { 
+              type: 'text', 
+              text: this.interpolateVariables(content.header, context || {})
+            };
           }
 
       } else if (content.label || content.message) {
           // Simple Text
           payload.type = 'text';
-          payload.text = { body: content.label || content.message };
+          payload.text = { 
+            body: this.interpolateVariables(content.label || content.message, context || {})
+          };
       } else {
-          console.error('[FlowEngine] Invalid message content');
+          console.error('[FlowEngine] Invalid message content:', JSON.stringify(content));
           return;
       }
 
-      // 3. Send Request
-      const response = await axios.post(url, payload, {
-          headers: {
-              'Authorization': `Bearer ${config.api_key}`,
-              'Content-Type': 'application/json'
-          }
-      });
+      // 3. Send Request (only if config exists)
+      let waMessageId = null;
+      let status = 'sent';
       
-      const waMessageId = response.data.messages?.[0]?.id;
-      console.log(`[FlowEngine] ✓ Message sent, ID: ${waMessageId}`);
+      if (hasConfig) {
+        try {
+          const response = await axios.post(url, payload, {
+              headers: {
+                  'Authorization': `Bearer ${config.api_key}`,
+                  'Content-Type': 'application/json'
+              }
+          });
+          
+          waMessageId = response.data.messages?.[0]?.id;
+          console.log(`[FlowEngine] ✓ Message sent to WhatsApp, ID: ${waMessageId}`);
+        } catch (error: any) {
+          console.error('[FlowEngine] WhatsApp API Error:', error.response?.data || error.message);
+          status = 'failed';
+        }
+      } else {
+        console.log(`[FlowEngine] ✓ Test mode - message logged (not sent to WhatsApp)`);
+      }
       
-      // 4. Log
+      // 4. Log message to database (always, even in test mode)
       await supabase.from('message_logs').insert({
           phone_number: to,
           message_type: payload.type,
           content: content,
-          status: 'sent',
+          status: status,
           wati_message_id: waMessageId,
       });
 

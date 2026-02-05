@@ -16,7 +16,7 @@ import {
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import api from '../../lib/axios';
-import { Save, ArrowLeft, Loader, MessageSquare, UserCheck, StickyNote, GitFork, Tag, Webhook, Headset } from 'lucide-react';
+import { Save, ArrowLeft, Loader, MessageSquare, UserCheck, StickyNote, GitFork, Tag, Webhook, Headset, Beaker } from 'lucide-react';
 
 import MessageNode from '../../components/flow/MessageNode';
 import InputNode from '../../components/flow/InputNode';
@@ -26,6 +26,7 @@ import TagNode from '../../components/flow/TagNode';
 import WebhookNode from '../../components/flow/WebhookNode';
 import AgentHandoffNode from '../../components/flow/AgentHandoffNode';
 import PropertiesPanel from '../../components/flow/PropertiesPanel';
+import FlowTestPanel from '../../components/flow/FlowTestPanel';
 
 import StartNode from '../../components/flow/StartNode';
 
@@ -55,6 +56,7 @@ const FlowBuilderContent = () => {
   const [saving, setSaving] = useState(false);
   const [flowName, setFlowName] = useState('');
   const [selectedNode, setSelectedNode] = useState<Node | null>(null);
+  const [showTestPanel, setShowTestPanel] = useState(false);
 
   useEffect(() => {
     if (id) {
@@ -64,8 +66,10 @@ const FlowBuilderContent = () => {
 
   const fetchFlow = async (flowId: string) => {
     try {
+      console.log('[FlowBuilder] Fetching flow:', flowId);
       const response = await api.get(`/flows/${flowId}`);
       const flowData = response.data.data;
+      console.log('[FlowBuilder] Flow data received:', flowData);
       setFlowName(flowData.name);
       
       // Always create start node first
@@ -76,6 +80,7 @@ const FlowBuilderContent = () => {
         data: { 
           label: 'Start', 
           triggerType: flowData.triggerType || 'webhook',
+          triggerValue: flowData.triggerValue || '',
           webhookUrl: flowData.webhookUrl
         },
         draggable: true,
@@ -84,12 +89,17 @@ const FlowBuilderContent = () => {
       // Map backend nodes to ReactFlow nodes
       const flowNodes = (flowData.nodes || [])
         .filter((n: any) => n.type !== 'start') // Filter out any existing start nodes from backend
-        .map((n: any) => ({
-          id: n._id, 
-          type: n.type, 
-          position: n.position || { x: 300, y: 100 },
-          data: { label: n.name, ...n.properties }, 
-        }));
+        .map((n: any) => {
+          console.log('[FlowBuilder] Mapping node:', n._id, 'properties:', n.properties);
+          return {
+            id: n._id, 
+            type: n.type, 
+            position: n.position || { x: 300, y: 100 },
+            data: { label: n.name, ...n.properties }, 
+          };
+        });
+      
+      console.log('[FlowBuilder] Mapped nodes:', flowNodes);
       
       // Combine start node with other nodes
       const allNodes = [startNode, ...flowNodes];
@@ -97,25 +107,37 @@ const FlowBuilderContent = () => {
       // Build edges from connections
       const initialEdges: Edge[] = [];
       
-      // Add edges from start node if first_node_id exists
+      // Add edge from start node to first node if firstNodeId exists
+      if (flowData.firstNodeId) {
+        console.log('[FlowBuilder] Creating start edge to:', flowData.firstNodeId);
+        initialEdges.push({
+          id: `e-start-${flowData.firstNodeId}`,
+          source: 'start-node',
+          target: flowData.firstNodeId,
+        });
+      }
+      
+      // Add edges from other nodes
       if (flowData.nodes) {
         flowData.nodes.forEach((sourceNode: any) => {
           if (sourceNode.connections) {
-            sourceNode.connections.forEach((conn: any) => {
+            sourceNode.connections.forEach((conn: any, idx: number) => {
               initialEdges.push({
-                id: `e${sourceNode._id}-${conn.targetNodeId}`,
+                id: `e${sourceNode._id}-${conn.targetNodeId}-${idx}`,
                 source: sourceNode._id,
                 target: conn.targetNodeId,
+                sourceHandle: conn.sourceHandle || undefined,
               });
             });
           }
         });
       }
 
+      console.log('[FlowBuilder] Final edges:', initialEdges);
       setNodes(allNodes);
       setEdges(initialEdges);
     } catch (error) {
-      console.error('Error fetching flow:', error);
+      console.error('[FlowBuilder] Error fetching flow:', error);
     } finally {
       setLoading(false);
     }
@@ -194,24 +216,27 @@ const FlowBuilderContent = () => {
     if (!id) return;
     setSaving(true);
     try {
-      console.log('Saving flow...', { nodes, edges });
+      console.log('[FlowBuilder] Starting save...');
+      console.log('[FlowBuilder] Current nodes:', nodes);
+      console.log('[FlowBuilder] Current edges:', edges);
       
       // 1. Find start node and its first connection
       const startNode = nodes.find(n => n.type === 'start');
       const startEdge = edges.find(e => e.source === 'start-node');
       const firstNodeId = startEdge?.target || null;
 
-      console.log('Start node:', startNode);
-      console.log('First node ID:', firstNodeId);
+      console.log('[FlowBuilder] Start node:', startNode);
+      console.log('[FlowBuilder] First node ID:', firstNodeId);
 
       // 2. Update Flow Metadata (Name, Trigger, First Node)
       if (startNode) {
+         console.log('[FlowBuilder] Updating flow metadata...');
          const flowUpdate = await api.put(`/flows/${id}`, {
             triggerType: startNode.data.triggerType || 'webhook',
             triggerValue: startNode.data.triggerValue || '',
             firstNodeId: firstNodeId
          });
-         console.log('Flow updated:', flowUpdate.data);
+         console.log('[FlowBuilder] Flow updated:', flowUpdate.data);
       }
 
       // 3. Prepare nodes payload with proper button routing
@@ -222,35 +247,39 @@ const FlowBuilderContent = () => {
         const connections = outgoingEdges.map((edge, index) => ({
             targetNodeId: edge.target,
             condition: '',
-            buttonIndex: index // Track which button leads to this connection
+            sourceHandle: edge.sourceHandle || '',
+            buttonIndex: index
         }));
 
-        return {
+        const payload = {
            id: node.id,
            type: node.type || 'message', 
            name: node.data.label || 'New Node',
            position: node.position,
-           properties: { ...node.data, label: undefined }, 
+           properties: node.data, // Keep all data including label
            connections,
         };
+        
+        console.log('[FlowBuilder] Node payload:', node.id, payload);
+        return payload;
       });
 
-      console.log('Saving nodes:', nodesPayload);
+      console.log('[FlowBuilder] Saving', nodesPayload.length, 'nodes...');
 
       const nodesResponse = await api.post('/nodes/batch', {
         flowId: id,
         nodes: nodesPayload
       });
       
-      console.log('Nodes saved:', nodesResponse.data);
+      console.log('[FlowBuilder] Nodes saved:', nodesResponse.data);
       
-      // Refresh flow data
+      // Refresh flow data to restore start node edge
       await fetchFlow(id);
       
       alert('Flow saved successfully!');
       
     } catch (error: any) {
-      console.error('Error saving flow:', error);
+      console.error('[FlowBuilder] Error saving flow:', error);
       alert(`Error saving flow: ${error.response?.data?.message || error.message}`);
     } finally {
       setSaving(false);
@@ -284,6 +313,14 @@ const FlowBuilderContent = () => {
              </div>
           </div>
           <div className="flex items-center space-x-4">
+             <button
+                onClick={() => setShowTestPanel(true)}
+                className="flex items-center px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 text-sm font-medium transition-colors shadow-sm"
+             >
+                <Beaker className="w-4 h-4 mr-2" />
+                Test Flow
+             </button>
+             
              <div className="flex items-center space-x-2 text-sm text-gray-600">
                 <span>Activate Workflow</span>
                 <button className="w-10 h-5 bg-gray-300 rounded-full relative cursor-pointer transition-colors">
@@ -437,6 +474,14 @@ const FlowBuilderContent = () => {
             />
           )}
        </div>
+
+       {/* Test Panel Modal */}
+       {showTestPanel && id && (
+         <FlowTestPanel
+           flowId={id}
+           onClose={() => setShowTestPanel(false)}
+         />
+       )}
     </div>
   );
 };

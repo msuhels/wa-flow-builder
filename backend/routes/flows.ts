@@ -13,6 +13,7 @@ const mapFlow = (flow: any) => ({
   triggerType: flow.trigger_type,
   triggerValue: flow.trigger_value,
   isActive: flow.is_active,
+  firstNodeId: flow.first_node_id,
   createdAt: flow.created_at,
   updatedAt: flow.updated_at,
 });

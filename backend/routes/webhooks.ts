@@ -139,8 +139,22 @@ router.post('/trigger/:flowId', async (req: Request, res: Response) => {
     // Start the flow directly
     await FlowEngine.startFlow(phoneNumber, flowId, data || {});
 
+    // Small delay to ensure message is logged
+    await new Promise(resolve => setTimeout(resolve, 100));
+
     // Get session info
     const session = await FlowEngine.getSession(phoneNumber);
+    
+    // Get the last message sent to this phone number
+    const { data: lastMessage } = await supabase
+      .from('message_logs')
+      .select('*')
+      .eq('phone_number', phoneNumber)
+      .order('sent_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    
+    console.log('[Webhook Trigger] Last message:', lastMessage);
 
     res.status(200).json({
       success: true,
@@ -153,6 +167,11 @@ router.post('/trigger/:flowId', async (req: Request, res: Response) => {
         currentNodeId: session.current_node_id,
         status: session.status,
         context: session.context
+      } : null,
+      botResponse: lastMessage ? {
+        content: lastMessage.content,
+        type: lastMessage.message_type,
+        sentAt: lastMessage.sent_at
       } : null
     });
 
@@ -218,10 +237,24 @@ router.post('/test', async (req: Request, res: Response) => {
     console.log('[Webhook Test] Simulating event:', normalizedEvent);
 
     // Process the event
-    const result = await FlowEngine.handleIncomingEvent(normalizedEvent);
+    await FlowEngine.handleIncomingEvent(normalizedEvent);
+
+    // Small delay to ensure message is logged
+    await new Promise(resolve => setTimeout(resolve, 100));
 
     // Get session info for response
-    const { data: session } = await FlowEngine.getSession(phoneNumber);
+    const session = await FlowEngine.getSession(phoneNumber);
+    
+    // Get the last message sent to this phone number
+    const { data: lastMessage } = await supabase
+      .from('message_logs')
+      .select('*')
+      .eq('phone_number', phoneNumber)
+      .order('sent_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    
+    console.log('[Webhook Test] Last message:', lastMessage);
 
     res.status(200).json({
       success: true,
@@ -234,6 +267,11 @@ router.post('/test', async (req: Request, res: Response) => {
         status: session.status,
         context: session.context,
         executionTrace: session.execution_trace
+      } : null,
+      botResponse: lastMessage ? {
+        content: lastMessage.content,
+        type: lastMessage.message_type,
+        sentAt: lastMessage.sent_at
       } : null
     });
 
