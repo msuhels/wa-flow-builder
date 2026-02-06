@@ -244,19 +244,30 @@ const FlowBuilderContent = () => {
         .filter(n => n.type !== 'start') // Exclude virtual start node
         .map(node => {
         const outgoingEdges = edges.filter(edge => edge.source === node.id);
-        const connections = outgoingEdges.map((edge, index) => ({
+        
+        // Map connections with button index from sourceHandle
+        const connections = outgoingEdges.map((edge) => {
+          let buttonIndex = 0;
+          
+          // Extract button index from sourceHandle (e.g., "button-0", "button-1")
+          if (edge.sourceHandle && edge.sourceHandle.startsWith('button-')) {
+            buttonIndex = parseInt(edge.sourceHandle.split('-')[1]);
+          }
+          
+          return {
             targetNodeId: edge.target,
             condition: '',
             sourceHandle: edge.sourceHandle || '',
-            buttonIndex: index
-        }));
+            buttonIndex: buttonIndex
+          };
+        });
 
         const payload = {
            id: node.id,
            type: node.type || 'message', 
            name: node.data.label || 'New Node',
            position: node.position,
-           properties: node.data, // Keep all data including label
+           properties: node.data,
            connections,
         };
         
