@@ -1,5 +1,6 @@
 import { Router, type Request, type Response } from 'express';
 import { FlowEngine } from '../services/flowEngine.js';
+import supabase from '../config/supabase.js';
 
 const router = Router();
 
@@ -112,6 +113,176 @@ router.get('/whatsapp', (req: Request, res: Response) => {
     } else {
         res.sendStatus(400);
     }
+});
+
+/**
+ * Direct Flow Trigger Webhook
+ * POST /api/webhooks/trigger/:flowId
+ * 
+ * Triggers a specific flow directly via webhook URL
+ */
+router.post('/trigger/:flowId', async (req: Request, res: Response) => {
+  try {
+    const { flowId } = req.params;
+    const { phoneNumber, data } = req.body;
+
+    if (!phoneNumber) {
+      res.status(400).json({ 
+        success: false, 
+        error: 'phoneNumber is required' 
+      });
+      return;
+    }
+
+    console.log(`[Webhook Trigger] Flow ${flowId} triggered for ${phoneNumber}`);
+
+    // Start the flow directly
+    await FlowEngine.startFlow(phoneNumber, flowId, data || {});
+
+    // Small delay to ensure message is logged
+    await new Promise(resolve => setTimeout(resolve, 100));
+
+    // Get session info
+    const session = await FlowEngine.getSession(phoneNumber);
+    
+    // Get the last message sent to this phone number
+    const { data: lastMessage } = await supabase
+      .from('message_logs')
+      .select('*')
+      .eq('phone_number', phoneNumber)
+      .order('sent_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    
+    console.log('[Webhook Trigger] Last message:', lastMessage);
+
+    res.status(200).json({
+      success: true,
+      message: 'Flow triggered successfully',
+      flowId: flowId,
+      phoneNumber: phoneNumber,
+      session: session ? {
+        id: session.id,
+        flowId: session.flow_id,
+        currentNodeId: session.current_node_id,
+        status: session.status,
+        context: session.context
+      } : null,
+      botResponse: lastMessage ? {
+        content: lastMessage.content,
+        type: lastMessage.message_type,
+        sentAt: lastMessage.sent_at
+      } : null
+    });
+
+  } catch (error: any) {
+    console.error('[Webhook Trigger] Error:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+/**
+ * Test Webhook Endpoint
+ * POST /api/webhooks/test
+ * 
+ * Simulates WhatsApp webhook payloads for testing flows locally
+ */
+router.post('/test', async (req: Request, res: Response) => {
+  try {
+    const { phoneNumber, type, text, buttonId, listId } = req.body;
+
+    if (!phoneNumber) {
+      res.status(400).json({ 
+        success: false, 
+        error: 'phoneNumber is required' 
+      });
+      return;
+    }
+
+    let normalizedEvent: any = {
+      from: phoneNumber,
+      messageId: `test_${Date.now()}`,
+    };
+
+    // Build event based on type
+    switch (type) {
+      case 'text':
+      case 'message':
+        normalizedEvent.type = 'message';
+        normalizedEvent.text = text || 'test message';
+        break;
+
+      case 'button':
+      case 'button_reply':
+        normalizedEvent.type = 'button_reply';
+        normalizedEvent.payload = buttonId || 'test_btn_0';
+        normalizedEvent.text = text || 'Button clicked';
+        break;
+
+      case 'list':
+      case 'list_reply':
+        normalizedEvent.type = 'list_reply';
+        normalizedEvent.payload = listId || 'test_list_0';
+        normalizedEvent.text = text || 'List item selected';
+        break;
+
+      default:
+        normalizedEvent.type = 'message';
+        normalizedEvent.text = text || 'test';
+    }
+
+    console.log('[Webhook Test] Simulating event:', normalizedEvent);
+
+    // Process the event
+    await FlowEngine.handleIncomingEvent(normalizedEvent);
+
+    // Small delay to ensure message is logged
+    await new Promise(resolve => setTimeout(resolve, 100));
+
+    // Get session info for response
+    const session = await FlowEngine.getSession(phoneNumber);
+    
+    // Get the last message sent to this phone number
+    const { data: lastMessage } = await supabase
+      .from('message_logs')
+      .select('*')
+      .eq('phone_number', phoneNumber)
+      .order('sent_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    
+    console.log('[Webhook Test] Last message:', lastMessage);
+
+    res.status(200).json({
+      success: true,
+      message: 'Test webhook processed',
+      event: normalizedEvent,
+      session: session ? {
+        id: session.id,
+        flowId: session.flow_id,
+        currentNodeId: session.current_node_id,
+        status: session.status,
+        context: session.context,
+        executionTrace: session.execution_trace
+      } : null,
+      botResponse: lastMessage ? {
+        content: lastMessage.content,
+        type: lastMessage.message_type,
+        sentAt: lastMessage.sent_at
+      } : null
+    });
+
+  } catch (error: any) {
+    console.error('[Webhook Test] Error:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message,
+      stack: error.stack
+    });
+  }
 });
 
 export default router;

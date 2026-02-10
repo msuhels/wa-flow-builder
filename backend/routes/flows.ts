@@ -13,6 +13,7 @@ const mapFlow = (flow: any) => ({
   triggerType: flow.trigger_type,
   triggerValue: flow.trigger_value,
   isActive: flow.is_active,
+  firstNodeId: flow.first_node_id,
   createdAt: flow.created_at,
   updatedAt: flow.updated_at,
 });
@@ -107,11 +108,35 @@ router.get('/:id', protect, async (req: Request, res: Response): Promise<void> =
 
     if (nodesError) throw nodesError;
 
+    // Add virtual start node with connections to first real node
+    const allNodes = nodes ? [...nodes] : [];
+    
+    // Create start node with connection to first node if exists
+    const startNodeConnections = flow.first_node_id 
+      ? [{ targetNodeId: flow.first_node_id }]
+      : [];
+    
+    const startNode = {
+      id: 'start-node',
+      flow_id: id,
+      type: 'start',
+      name: 'Start',
+      properties: {
+        triggerType: flow.trigger_type,
+        triggerValue: flow.trigger_value,
+        webhookUrl: `${process.env.API_URL || 'http://localhost:3001'}/api/webhooks/trigger/${id}`
+      },
+      connections: startNodeConnections,
+      position: { x: 100, y: 100 },
+      created_at: flow.created_at
+    };
+
     res.status(200).json({
       success: true,
       data: {
         ...mapFlow(flow),
-        nodes: nodes.map(mapNode),
+        webhookUrl: `${process.env.API_URL || 'http://localhost:3001'}/api/webhooks/trigger/${id}`,
+        nodes: [startNode, ...allNodes.map(mapNode)],
       },
     });
   } catch (error) {
@@ -127,7 +152,7 @@ router.get('/:id', protect, async (req: Request, res: Response): Promise<void> =
 router.put('/:id', protect, async (req: Request, res: Response): Promise<void> => {
   try {
     const { id } = req.params;
-    const { name, description, triggerType, triggerValue, isActive } = req.body;
+    const { name, description, triggerType, triggerValue, isActive, firstNodeId } = req.body;
 
     const updates: any = {};
     if (name !== undefined) updates.name = name;
@@ -135,6 +160,7 @@ router.put('/:id', protect, async (req: Request, res: Response): Promise<void> =
     if (triggerType !== undefined) updates.trigger_type = triggerType;
     if (triggerValue !== undefined) updates.trigger_value = triggerValue;
     if (isActive !== undefined) updates.is_active = isActive;
+    if (firstNodeId !== undefined) updates.first_node_id = firstNodeId;
     updates.updated_at = new Date().toISOString();
 
     const { data, error } = await supabase

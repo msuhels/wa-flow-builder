@@ -1,11 +1,12 @@
 import React, { useEffect, useState } from 'react';
 import api from '../lib/axios';
-import { LayoutDashboard, GitBranch, MessageSquare, CheckCircle, XCircle, Send } from 'lucide-react';
+import { LayoutDashboard, GitBranch, MessageSquare, CheckCircle, XCircle, Send, Users } from 'lucide-react';
 
 interface DashboardStats {
   totalFlows: number;
   activeFlows: number;
   messagesSentToday: number;
+  totalContacts: number;
   deliveryStatus: Record<string, number>;
 }
 
@@ -73,6 +74,17 @@ const Dashboard = () => {
           <p className="text-3xl font-bold text-gray-900">{stats?.activeFlows || 0}</p>
         </div>
 
+        {/* Total Contacts Card */}
+        <div className="bg-white rounded-lg shadow-sm p-6 border border-gray-100">
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-gray-500 text-sm font-medium">Total Contacts</h3>
+            <div className="bg-indigo-100 p-2 rounded-lg">
+              <Users className="w-5 h-5 text-indigo-600" />
+            </div>
+          </div>
+          <p className="text-3xl font-bold text-gray-900">{stats?.totalContacts || 0}</p>
+        </div>
+
         {/* Messages Sent Today Card */}
         <div className="bg-white rounded-lg shadow-sm p-6 border border-gray-100">
           <div className="flex items-center justify-between mb-4">
@@ -83,40 +95,28 @@ const Dashboard = () => {
           </div>
           <p className="text-3xl font-bold text-gray-900">{stats?.messagesSentToday || 0}</p>
         </div>
-
-        {/* Delivery Success Rate (Mockup for now based on stats) */}
-        <div className="bg-white rounded-lg shadow-sm p-6 border border-gray-100">
-          <div className="flex items-center justify-between mb-4">
-            <h3 className="text-gray-500 text-sm font-medium">Delivery Status</h3>
-            <div className="bg-orange-100 p-2 rounded-lg">
-              <MessageSquare className="w-5 h-5 text-orange-600" />
-            </div>
-          </div>
-          <div className="space-y-2">
-             <div className="flex justify-between text-sm">
-                <span className="text-gray-600">Sent</span>
-                <span className="font-medium">{stats?.deliveryStatus['sent'] || 0}</span>
-             </div>
-             <div className="flex justify-between text-sm">
-                <span className="text-gray-600">Delivered</span>
-                <span className="font-medium text-green-600">{stats?.deliveryStatus['delivered'] || 0}</span>
-             </div>
-             <div className="flex justify-between text-sm">
-                <span className="text-gray-600">Failed</span>
-                <span className="font-medium text-red-600">{stats?.deliveryStatus['failed'] || 0}</span>
-             </div>
-          </div>
-        </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-         {/* Placeholder for Recent Activity or Charts */}
-         <div className="bg-white rounded-lg shadow-sm p-6 border border-gray-100 h-64 flex items-center justify-center text-gray-400">
-            Chart Visualization Coming Soon
-         </div>
-         <div className="bg-white rounded-lg shadow-sm p-6 border border-gray-100 h-64 flex items-center justify-center text-gray-400">
-            Recent Activity Log Coming Soon
-         </div>
+      <div className="bg-white rounded-lg shadow-sm p-6 border border-gray-100 mb-6">
+        <h3 className="text-lg font-semibold text-gray-900 mb-4">Message Delivery Status</h3>
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <div className="text-center p-4 bg-blue-50 rounded-lg">
+            <div className="text-2xl font-bold text-blue-600">{stats?.deliveryStatus['sent'] || 0}</div>
+            <div className="text-sm text-gray-600 mt-1">Sent</div>
+          </div>
+          <div className="text-center p-4 bg-green-50 rounded-lg">
+            <div className="text-2xl font-bold text-green-600">{stats?.deliveryStatus['delivered'] || 0}</div>
+            <div className="text-sm text-gray-600 mt-1">Delivered</div>
+          </div>
+          <div className="text-center p-4 bg-purple-50 rounded-lg">
+            <div className="text-2xl font-bold text-purple-600">{stats?.deliveryStatus['read'] || 0}</div>
+            <div className="text-sm text-gray-600 mt-1">Read</div>
+          </div>
+          <div className="text-center p-4 bg-red-50 rounded-lg">
+            <div className="text-2xl font-bold text-red-600">{stats?.deliveryStatus['failed'] || 0}</div>
+            <div className="text-sm text-gray-600 mt-1">Failed</div>
+          </div>
+        </div>
       </div>
     </div>
   );

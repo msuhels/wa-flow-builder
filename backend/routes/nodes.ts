@@ -109,20 +109,27 @@ router.post('/batch', protect, async (req: Request, res: Response): Promise<void
   try {
     const { flowId, nodes } = req.body;
 
+    console.log('[Nodes Batch] Request:', { flowId, nodeCount: nodes?.length });
+
     if (!flowId) {
       res.status(400).json({ success: false, message: 'Flow ID required' });
       return;
     }
 
     // 1. Delete existing nodes for this flow
+    console.log('[Nodes Batch] Deleting existing nodes for flow:', flowId);
     const { error: deleteError } = await supabase
       .from('nodes')
       .delete()
       .eq('flow_id', flowId);
 
-    if (deleteError) throw deleteError;
+    if (deleteError) {
+      console.error('[Nodes Batch] Delete error:', deleteError);
+      throw deleteError;
+    }
 
     if (!nodes || nodes.length === 0) {
+      console.log('[Nodes Batch] No nodes to insert');
       res.status(200).json({ success: true, data: [] });
       return;
     }
@@ -134,9 +141,11 @@ router.post('/batch', protect, async (req: Request, res: Response): Promise<void
       type: node.type,
       name: node.name,
       position: node.position,
-      properties: node.properties,
+      properties: node.properties || {},
       connections: node.connections || [],
     }));
+
+    console.log('[Nodes Batch] Inserting nodes:', nodesToInsert.length);
 
     // 3. Insert new nodes
     const { data, error: insertError } = await supabase
@@ -144,11 +153,15 @@ router.post('/batch', protect, async (req: Request, res: Response): Promise<void
       .insert(nodesToInsert)
       .select();
 
-    if (insertError) throw insertError;
+    if (insertError) {
+      console.error('[Nodes Batch] Insert error:', insertError);
+      throw insertError;
+    }
 
+    console.log('[Nodes Batch] Success! Inserted:', data?.length);
     res.status(200).json({ success: true, data: data.map(mapNode) });
   } catch (error) {
-    console.error(error);
+    console.error('[Nodes Batch] Error:', error);
     res.status(500).json({ success: false, message: 'Server Error' });
   }
 });

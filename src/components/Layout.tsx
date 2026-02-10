@@ -1,7 +1,7 @@
 import React from 'react';
 import { Outlet, Link, useLocation, useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../store/useAuthStore';
-import { LayoutDashboard, MessageSquare, Settings, LogOut, GitBranch } from 'lucide-react';
+import { LayoutDashboard, MessageSquare, Settings, LogOut, GitBranch, Users } from 'lucide-react';
 
 const Layout = () => {
   const { logout, user } = useAuthStore();
@@ -16,6 +16,7 @@ const Layout = () => {
   const navItems = [
     { path: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
     { path: '/flows', label: 'Flows', icon: GitBranch },
+    { path: '/contacts', label: 'Contacts', icon: Users },
     { path: '/settings', label: 'Settings', icon: Settings },
   ];
 

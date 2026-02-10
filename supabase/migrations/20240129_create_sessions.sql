@@ -5,7 +5,7 @@ CREATE TABLE IF NOT EXISTS contact_sessions (
   phone_number TEXT NOT NULL, -- Redundant but useful for quick lookup
   flow_id UUID REFERENCES flows(id) ON DELETE SET NULL,
   current_node_id TEXT, -- ID from the JSON node structure
-  status TEXT DEFAULT 'active' CHECK (status IN ('active', 'paused', 'completed')),
+  status TEXT DEFAULT 'active' CHECK (status IN ('active', 'paused', 'completed', 'expired')),
   context JSONB DEFAULT '{}'::jsonb, -- Store temporary flow variables
   last_interaction_at TIMESTAMPTZ DEFAULT NOW(),
   created_at TIMESTAMPTZ DEFAULT NOW()
